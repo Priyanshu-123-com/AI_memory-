@@ -7,6 +7,11 @@ from enum import Enum
 from collections import deque
 from datetime import datetime
 from llm_interface import llm_client
+import os
+try:
+    from supabase_config import supabase_client
+except ImportError:
+    supabase_client = None
 
 class MemoryTier(Enum):
     L1_FAST_REACTOR = "L1_Redis_Cache"
@@ -87,6 +92,13 @@ class MemGraphCore:
         # "Nuclear" Configs
         self.neural_cache_hits = 0
         self.global_turn = 0
+        
+        # Supabase Integration
+        self.db = supabase_client
+        if self.db:
+            print("[MemGraph] Connected to Supabase backend.")
+        else:
+            print("[MemGraph] Running in In-Memory Mode (No Supabase credentials).")
 
     def increment_turn(self):
         self.global_turn += 1
@@ -112,7 +124,25 @@ class MemGraphCore:
         self._update_indexes(mem, entities)
 
         # Storage Deployment (New memories go to L2 initially)
-        self.l2_episodic.append(mem)
+        if self.db:
+            # Persistent Storage via Supabase
+            try:
+                data = {
+                    "id": str(uuid.uuid4()), # Supabase generates UUIDs, but we can provide if needed, or let DB handle
+                    "content": mem.content,
+                    "tier": mem.tier.value,
+                    "embedding": mem.embedding,
+                    "metadata": mem.metadata
+                }
+                self.db.table("memgraph_memories").insert(data).execute()
+            except Exception as e:
+                print(f"[DB Error] Insert failed: {e}")
+                # Fallback to local
+                self.l2_episodic.append(mem)
+        else:
+            # Local In-Memory
+            self.l2_episodic.append(mem)
+        
         mem.tier = MemoryTier.L2_EPISODIC
         
         # Check for L1 Promotion (Hot Memory)
@@ -166,8 +196,37 @@ class MemGraphCore:
             mem.update_access()
             return [mem]
 
-        # 2. Vector Similarity check (simulated) on L2 and L3
-        # In a real app, this would be a dot product of query_emb vs all_embs
+        # 2. Vector Similarity check (simulated OR via DB)
+        if self.db:
+            # Supabase Vector Search
+            try:
+                # Need to use an RPC calling match_memories
+                # Embedding is [float] * 128
+                query_vec = [random.random() for _ in range(128)] # Mock query vector generation (should be real embedding model)
+                
+                response = self.db.rpc("match_memories", {
+                    "query_embedding": query_vec, 
+                    "match_threshold": 0.5, 
+                    "match_count": top_k
+                }).execute()
+                
+                if response.data:
+                    # Convert DB rows back to Memory objects
+                    db_results = []
+                    for row in response.data:
+                        m = Memory(row['content'], metadata=row['metadata'])
+                        m.half_life_score = row.get('similarity', 0.9) # Use similarity as score
+                        m.internal_code = str(row['id']) # Use DB UUID as code
+                        db_results.append(m)
+                    
+                    # Update access stats (in metadata) for retrieved items?
+                    # For performance, maybe skip writing back immediately in hackathon
+                    return db_results
+            except Exception as e:
+                print(f"[DB Error] Retrieval failed: {e}")
+                # Fallback to local logic below...
+
+        # Local Logic (Fallback)
         candidates = list(self.l2_episodic) + self.l3_semantic
         
         query_vec = [random.random() for _ in range(128)] # Mock query vector

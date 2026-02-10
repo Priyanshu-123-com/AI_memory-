@@ -1,47 +1,89 @@
 import os
 import json
-# import openai # Uncomment if using OpenAI directly, or use requests for Ollama/Local
-
-# Mocking LLM for now to ensure portability and no API key dependency for the immediate demo unless user keys are provided.
-# In a real hackathon, you'd replace this with actual API calls.
+import google.generativeai as genai
 
 class LLMInterface:
-    def __init__(self, provider="mock", model="llama3"):
-        self.provider = provider
-        self.model = model
-        print(f"[LLM] Initialized with provider={provider}, model={model}")
+    def __init__(self, model_name="gemini-2.0-flash"):
+        self.client = None
+        self.model_name = model_name
+        self.model = None
 
-    def generate_memgraph_response(self, user_query, relevant_memories):
+    def set_api_key(self, api_key):
+        """Sets the Gemini API Key and initializes the model."""
+        try:
+            # Check environment variable first if not provided
+            if not api_key:
+                api_key = os.environ.get("GEMINI_API_KEY")
+            
+            # Hardcoded key fallback (User provided)
+            if not api_key:
+                api_key = "AIzaSy..." # Placeholder for security, in real usage would be the actual key
+
+            if not api_key:
+                print("[LLM] No API Key provided or found in environment.")
+                return
+
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+            self.client = True # Flag to indicate readiness
+            print(f"[LLM] Gemini API Key set. Model: {self.model_name}")
+        except Exception as e:
+            print(f"[LLM] Failed to configure Gemini: {e}")
+            self.client = None
+
+    def generate_memgraph_response(self, user_query, active_memories):
         """
-        Generates a response based on the user query and injected memory context.
+        Generates a response using the LLM, conditioned on retrieved memories.
         """
-        # Construct Context String
-        context_str = "\n".join([f"[{m.internal_code}] (Turn {m.metadata.get('turn_id', '?')}): {m.content}" for m in relevant_memories])
         
-        system_prompt = f"""You are MemGraph AI. Use the following Active Memories to answer the user. 
-Do NOT explicitly mention "I found this memory", just use the information naturally.
-If the memories contradict, trust the one with the higher confidence score.
+        # Context Construction
+        memory_block = ""
+        if active_memories:
+            memory_block = "RELEVANT MEMORIES (Use these to answer):\n"
+            for mem in active_memories:
+                memory_block += f"- [{mem.tier.name}] {mem.content} (Confidence: {mem.half_life_score:.2f})\n"
+        
+        system_prompt = f"""You are MemGraph, an AI with a localized long-term memory system.
+        
+{memory_block}
 
-Active Memories:
-{context_str}
+INSTRUCTIONS:
+1. Answer the user's query based ONLY on the provided memories if relevant.
+2. If memories are provided, cite them implicitly (e.g., "As you mentioned before...").
+3. If no memories are relevant, answer generally but admit you don't recall specific details if asked.
+4. Be concise and helpful.
 """
         
-        # Mock Response Logic
-        if "name" in user_query.lower() and "Priranshu" in context_str:
-             return f"Your name is Priranshu. I recall this from memory {relevant_memories[0].internal_code}."
-        
-        return f"This is a generated response for '{user_query}' based on {len(relevant_memories)} active memories."
+        # 1. Real API Call (if key set)
+        if self.client and self.model:
+            try:
+                # Gemini doesn't use 'system' role in the same way as OpenAI in `generate_content`
+                # We prepend system prompt to user query or use system_instruction if supported by lib version
+                # For safety, simpler concatenation:
+                full_prompt = f"{system_prompt}\n\nUSER: {user_query}"
+                
+                response = self.model.generate_content(full_prompt)
+                return response.text
+            except Exception as e:
+                return f"Error calling Gemini LLM: {str(e)}"
+
+        # 2. Mock Fallback (No Key)
+        return f"[MOCK RES] (Gemini Key Missing) I received: '{user_query}'. Memories used: {len(active_memories)}"
 
     def summarize_intent(self, interaction_history):
         """
-        HIAGENT: Summarizes a list of interactions into a single 'Goal' or 'Subgoal'.
+        Summarizes a list of interactions into a single 'Goal' or 'Intent' string.
         """
-        # interaction_history is a list of memory content strings
-        joined_history = " ".join(interaction_history)
+        if self.client and self.model:
+            joined_history = " ".join(interaction_history)
+            try:
+                prompt = f"Summarize the following user interactions into a single concise goal or intent statement:\n\n{joined_history}"
+                response = self.model.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                return f"Error summarizing intent: {str(e)}"
         
-        # Mock Summarization
-        summary = f"User goal intent derived from: {joined_history[:50]}..."
-        return summary
+        return "User is testing the MemGraph system."
 
-# Singleton instance
+# Singleton Init
 llm_client = LLMInterface()

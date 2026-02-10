@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#050505] text-gray-200 font-sans overflow-hidden selection:bg-cyan-500/30;
+
+    /* Subtle Noise Texture */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+}
+
+.glass-substrate {
+  @apply backdrop-blur-[40px] bg-white/[0.03] border border-white/10 shadow-[0_4px_30px_rgba(0, 0, 0, 0.1)];
+}
+
+.neon-text-cyan {
+  text-shadow: 0 0 10px #00F2FF, 0 0 20px rgba(0, 242, 255, 0.5);
+}
+
+.neon-text-amber {
+  text-shadow: 0 0 10px #FFB800, 0 0 20px rgba(255, 184, 0, 0.5);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-800 rounded-full hover:bg-cyan-500/50 transition-colors;
+}
